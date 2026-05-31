@@ -1,6 +1,20 @@
-# BlurOCR .gitignore
+# Dependencies
+node_modules/
 
-# OS files
+# Build artifacts
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -9,22 +23,17 @@ desktop.ini
 .vscode/
 .idea/
 *.sublime-project
-*.sublime-workspace
 
-# Logs
-*.log
+# Test output
+test/output/
+test/debug/
 
-# Temp
-*.tmp
-*.temp
+# Temp upload files
+/tmp/
 
-# Node (if anyone adds a build step in future)
-node_modules/
-dist/
-.env
-
-# Test images (keep repo lightweight)
-test-images/
-
-# Archives (release zips are attached to GitHub Releases, not committed)
+# Release zips (attached to GitHub Releases)
 *.zip
+
+# Preprocessed debug images
+debug-*.png
+preprocessed-*.png

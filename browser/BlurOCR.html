@@ -1,0 +1,1771 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+  BlurOCR — Open Source Advanced OCR with Blur Recovery
+  Version: 1.0.0
+  License: MIT
+  Author: BlurOCR Contributors
+  GitHub: https://github.com/Alok583/blurocr
+
+  ABOUT:
+  BlurOCR is a fully client-side, open-source OCR tool that runs entirely in
+  your browser using WebAssembly. No server. No API key. No data leaves your
+  machine. It applies a multi-stage computer vision preprocessing pipeline
+  (powered by OpenCV.js) before feeding to Tesseract.js — dramatically
+  improving accuracy on blurry, low-contrast, and degraded images.
+
+  TECH STACK (all open-source):
+  - OpenCV.js 4.8.0  (Apache 2.0) — Computer vision preprocessing
+  - Tesseract.js 5   (Apache 2.0) — WASM OCR engine
+  - Vanilla JS/HTML/CSS           — Zero framework dependencies
+
+  PREPROCESSING PIPELINE:
+  1.  Blur level detection (Laplacian variance)
+  2.  Auto-upscale if image is small
+  3.  Grayscale conversion
+  4.  CLAHE — Contrast Limited Adaptive Histogram Equalization
+  5.  Non-local means denoising
+  6.  Unsharp masking (sharpening kernel)
+  7.  Adaptive thresholding (Gaussian weighted)
+  8.  Morphological closing (fill letter gaps)
+  9.  Auto-deskew (Hough line detection)
+  10. Border padding for Tesseract accuracy
+
+  BUILDING / RUNNING:
+  Just open this HTML file in any modern browser. Everything downloads
+  automatically on first use and is cached by the browser.
+
+  CONTRIBUTING:
+  PRs welcome! See CONTRIBUTING.md in the repository.
+
+  MIT LICENSE:
+  Copyright (c) 2025 BlurOCR Contributors
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+================================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlurOCR — Open Source OCR</title>
+
+<!-- OpenCV.js: Computer Vision in WebAssembly (Apache 2.0) -->
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady()" onerror="onOpenCvError()"></script>
+
+<!-- Tesseract.js: OCR in WebAssembly (Apache 2.0) -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+/* ============================================================
+   DESIGN: Industrial / Precision instrument aesthetic
+   Dark bg, monospace data readouts, crisp borders
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0d0e14;
+  --bg2:      #13141d;
+  --bg3:      #1a1c28;
+  --border:   #252638;
+  --border2:  #33364d;
+  --accent:   #00d4aa;
+  --accent2:  #7b6cff;
+  --accent3:  #ff6b6b;
+  --warn:     #ffb347;
+  --text:     #dde1f0;
+  --text2:    #8b90a8;
+  --text3:    #555870;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+  --radius:   8px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Scanline overlay (aesthetic) ── */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.06) 2px,
+    rgba(0,0,0,0.06) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Layout ── */
+.app { max-width: 1200px; margin: 0 auto; padding: 0 20px 80px; }
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 0 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header-left { display: flex; align-items: center; gap: 14px; }
+
+.logo-mark {
+  width: 40px; height: 40px;
+  background: var(--accent);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+  box-shadow: 0 0 20px rgba(0,212,170,0.3);
+}
+
+.app-name {
+  font-family: var(--mono);
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.app-name em { color: var(--accent); font-style: normal; }
+
+.version-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: rgba(0,212,170,0.1);
+  border: 1px solid rgba(0,212,170,0.25);
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.1em;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text2);
+}
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text3);
+  transition: background 0.3s;
+  flex-shrink: 0;
+}
+
+.status-dot.ready    { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.status-dot.loading  { background: var(--warn); animation: pulse 1s infinite; }
+.status-dot.error    { background: var(--accent3); }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── Panels ── */
+.panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.panel-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title-accent { color: var(--accent); }
+
+.panel-body { padding: 20px; }
+
+/* ── Drop zone ── */
+.dropzone {
+  border: 2px dashed var(--border2);
+  border-radius: var(--radius);
+  padding: 56px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg2);
+}
+
+.dropzone:hover, .dropzone.drag-over {
+  border-color: var(--accent);
+  background: rgba(0,212,170,0.04);
+}
+
+.dropzone input[type=file] {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer;
+  width: 100%; height: 100%;
+  font-size: 0;
+}
+
+.drop-icon { font-size: 44px; margin-bottom: 12px; display: block; }
+
+.drop-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.drop-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+
+/* ── Settings grid ── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.setting-item {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.setting-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text3);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setting-val {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+input[type=range] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 3px;
+  margin-top: 2px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.toggle {
+  position: relative;
+  width: 36px; height: 20px;
+  cursor: pointer;
+}
+
+.toggle input { opacity: 0; width: 0; height: 0; }
+
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--border2);
+  border-radius: 10px;
+  transition: 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px; height: 14px;
+  left: 3px; top: 3px;
+  background: var(--text2);
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.toggle input:checked + .toggle-slider { background: rgba(0,212,170,0.3); }
+.toggle input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+select {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 4px;
+  outline: none;
+}
+
+select:focus { border-color: var(--accent); }
+
+/* ── Image grid ── */
+.image-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 800px) { .image-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 500px) { .image-grid { grid-template-columns: 1fr; } }
+
+.img-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.img-panel-head {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.img-panel-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+.img-panel-body {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.img-panel-body img, .img-panel-body canvas {
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 4px;
+  display: block;
+}
+
+.img-placeholder {
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* ── Pipeline stages ── */
+.pipeline {
+  display: flex;
+  gap: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  flex-wrap: wrap;
+}
+
+.stage {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s;
+}
+
+.stage.active  { border-color: var(--accent);  color: var(--accent);  background: rgba(0,212,170,0.08); }
+.stage.done    { border-color: var(--accent2);  color: var(--accent2); background: rgba(123,108,255,0.08); }
+.stage.error   { border-color: var(--accent3);  color: var(--accent3); }
+
+/* ── Progress ── */
+.progress-wrap {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 0 16px 16px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  border-radius: 2px;
+  width: 0;
+  transition: width 0.4s ease;
+}
+
+/* ── Action bar ── */
+.action-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 22px;
+  border-radius: var(--radius);
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+
+.btn-primary {
+  background: var(--accent);
+  color: #000;
+  flex: 1;
+  justify-content: center;
+  min-width: 140px;
+}
+
+.btn-primary:not(:disabled):hover { background: #00f0c4; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,212,170,0.3); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text2);
+  border: 1px solid var(--border2);
+}
+
+.btn-ghost:not(:disabled):hover { border-color: var(--accent2); color: var(--accent2); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--accent3);
+  border: 1px solid rgba(255,107,107,0.3);
+}
+
+.btn-danger:hover { background: rgba(255,107,107,0.08); }
+
+/* ── Output area ── */
+.output-area {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.output-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.output-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.meta-chip {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border2);
+  color: var(--text3);
+}
+
+.meta-chip.good { border-color: rgba(0,212,170,0.4); color: var(--accent); }
+.meta-chip.mid  { border-color: rgba(255,179,71,0.4); color: var(--warn); }
+.meta-chip.bad  { border-color: rgba(255,107,107,0.4); color: var(--accent3); }
+
+.output-actions { display: flex; gap: 6px; }
+
+.btn-sm {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--text2);
+  transition: all 0.15s;
+}
+
+.btn-sm:hover { border-color: var(--accent3); color: var(--accent3); }
+.btn-sm.copy:hover { border-color: var(--accent); color: var(--accent); }
+
+#outputText {
+  padding: 20px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  min-height: 140px;
+  color: var(--text);
+  outline: none;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+#outputText:empty::before {
+  content: 'Extracted text will appear here…';
+  color: var(--text3);
+}
+
+#outputText:focus { background: rgba(255,255,255,0.01); }
+
+/* ── Stats bar ── */
+.stats-bar {
+  display: flex;
+  gap: 20px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg3);
+  flex-wrap: wrap;
+}
+
+.stat {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.stat strong { color: var(--text); font-weight: 500; }
+
+/* ── Log ── */
+.log-area {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+  max-height: 160px;
+  overflow-y: auto;
+  line-height: 1.8;
+}
+
+.log-line { display: flex; gap: 12px; }
+.log-time { color: var(--text3); flex-shrink: 0; }
+.log-msg.info   { color: var(--text2); }
+.log-msg.ok     { color: var(--accent); }
+.log-msg.warn   { color: var(--warn); }
+.log-msg.error  { color: var(--accent3); }
+.log-msg.data   { color: var(--accent2); }
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* ── Footer ── */
+.footer {
+  border-top: 1px solid var(--border);
+  margin-top: 40px;
+  padding: 20px 0 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.footer a {
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.footer-left { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+/* ── Blur meter ── */
+.blur-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.blur-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  max-width: 100px;
+}
+
+.blur-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s, background 0.5s;
+}
+
+/* ── Tabs ── */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+}
+
+.tab {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 10px 16px;
+  cursor: pointer;
+  color: var(--text3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.tab:hover { color: var(--text2); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .btn { padding: 10px 16px; font-size: 13px; }
+  .settings-grid { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══ HEADER ═══════════════════════════════════════════════════════════ -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-mark">🔬</div>
+      <div>
+        <div class="app-name">Blur<em>OCR</em></div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px;">
+          open source · runs locally · no api key
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-pill" id="cvStatus">
+        <span class="status-dot loading" id="cvDot"></span>
+        <span id="cvLabel">Loading OpenCV…</span>
+      </div>
+      <div class="status-pill" id="tessStatus">
+        <span class="status-dot loading" id="tessDot"></span>
+        <span id="tessLabel">Loading Tesseract…</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ DROP ZONE ════════════════════════════════════════════════════════ -->
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" accept="image/*" multiple>
+    <span class="drop-icon">📷</span>
+    <div class="drop-title">Drop image here or click to browse</div>
+    <div class="drop-sub">JPG · PNG · WEBP · BMP · TIFF · GIF &nbsp;|&nbsp; Any quality, any blur level</div>
+  </div>
+
+  <!-- ═══ SETTINGS ═════════════════════════════════════════════════════════ -->
+  <div class="panel" id="settingsPanel" style="display:none">
+    <div class="panel-header">
+      <div class="panel-title">⚙ <span class="panel-title-accent">Preprocessing Pipeline</span></div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);">
+        Auto-configured · adjust manually if needed
+      </div>
+    </div>
+    <div class="panel-body" style="padding:16px">
+      <div class="settings-grid">
+
+        <div class="setting-item">
+          <div class="setting-label">Sharpening <span class="setting-val" id="valSharpen">2.0×</span></div>
+          <input type="range" id="slSharpen" min="0" max="5" step="0.5" value="2">
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Denoise Strength <span class="setting-val" id="valDenoise">10</span></div>
+          <input type="range" id="slDenoise" min="0" max="30" step="1" value="10">
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">CLAHE Clip Limit <span class="setting-val" id="valClahe">3.0</span></div>
+          <input type="range" id="slClahe" min="1" max="10" step="0.5" value="3">
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Block Size (Thresh) <span class="setting-val" id="valBlock">11</span></div>
+          <input type="range" id="slBlock" min="3" max="51" step="2" value="11">
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Upscale Factor <span class="setting-val" id="valScale">2×</span></div>
+          <input type="range" id="slScale" min="1" max="4" step="0.5" value="2">
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">OCR Language</div>
+          <select id="selLang">
+            <option value="eng">English</option>
+            <option value="eng+fra">English + French</option>
+            <option value="eng+deu">English + German</option>
+            <option value="eng+spa">English + Spanish</option>
+            <option value="fra">French</option>
+            <option value="deu">German</option>
+            <option value="spa">Spanish</option>
+            <option value="por">Portuguese</option>
+            <option value="chi_sim">Chinese Simplified</option>
+            <option value="jpn">Japanese</option>
+            <option value="kor">Korean</option>
+            <option value="ara">Arabic</option>
+            <option value="hin">Hindi</option>
+            <option value="rus">Russian</option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Page Segmentation Mode</div>
+          <select id="selPsm">
+            <option value="3">3 — Fully automatic</option>
+            <option value="6" selected>6 — Uniform block of text</option>
+            <option value="7">7 — Single text line</option>
+            <option value="8">8 — Single word</option>
+            <option value="11">11 — Sparse text</option>
+            <option value="12">12 — Sparse + OSD</option>
+            <option value="13">13 — Raw line</option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Auto-deskew</div>
+          <div class="toggle-row">
+            <span style="font-size:12px;color:var(--text2)">Straighten tilted text</span>
+            <label class="toggle">
+              <input type="checkbox" id="togDeskew" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Adaptive Threshold</div>
+          <div class="toggle-row">
+            <span style="font-size:12px;color:var(--text2)">Better for uneven lighting</span>
+            <label class="toggle">
+              <input type="checkbox" id="togAdaptive" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-label">Morphological Closing</div>
+          <div class="toggle-row">
+            <span style="font-size:12px;color:var(--text2)">Fill gaps in letters</span>
+            <label class="toggle">
+              <input type="checkbox" id="togMorph" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+      </div>
+
+      <div style="margin-top:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div class="blur-meter">
+          <span>Blur Level:</span>
+          <div class="blur-bar"><div class="blur-fill" id="blurFill" style="width:0%"></div></div>
+          <span id="blurLabel">—</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3)" id="imgMeta"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ IMAGE PANELS ══════════════════════════════════════════════════════ -->
+  <div class="image-grid" id="imageGrid" style="display:none">
+    <div class="img-panel">
+      <div class="img-panel-head">
+        <div class="img-panel-dot" style="background:var(--accent3)"></div>
+        Original Input
+      </div>
+      <div class="img-panel-body">
+        <img id="imgOriginal" alt="Original">
+      </div>
+    </div>
+    <div class="img-panel">
+      <div class="img-panel-head">
+        <div class="img-panel-dot" style="background:var(--warn)"></div>
+        After OpenCV Processing
+      </div>
+      <div class="img-panel-body">
+        <canvas id="canvasProcessed"></canvas>
+        <div class="img-placeholder" id="phProcessed">Run extraction to see</div>
+      </div>
+    </div>
+    <div class="img-panel">
+      <div class="img-panel-head">
+        <div class="img-panel-dot" style="background:var(--accent)"></div>
+        Final OCR Input
+      </div>
+      <div class="img-panel-body">
+        <canvas id="canvasFinal"></canvas>
+        <div class="img-placeholder" id="phFinal">Run extraction to see</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PIPELINE STATUS ═══════════════════════════════════════════════════ -->
+  <div class="panel" id="pipelinePanel" style="display:none">
+    <div class="panel-header">
+      <div class="panel-title">⬡ <span class="panel-title-accent">Processing Pipeline</span></div>
+      <div id="pipelineTime" style="font-family:var(--mono);font-size:10px;color:var(--text3)"></div>
+    </div>
+    <div class="pipeline" id="pipelineStages">
+      <!-- Stages injected by JS -->
+    </div>
+    <div class="progress-wrap"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <!-- ═══ ACTION BAR ════════════════════════════════════════════════════════ -->
+  <div class="action-bar" id="actionBar" style="display:none">
+    <button class="btn btn-primary" id="btnExtract" onclick="runExtraction()">
+      ▶ Extract Text
+    </button>
+    <button class="btn btn-ghost" onclick="previewProcessing()">
+      ◈ Preview Processing
+    </button>
+    <button class="btn btn-ghost" id="btnPreset" onclick="autoPreset()">
+      ⚡ Auto Preset
+    </button>
+    <button class="btn btn-danger" onclick="resetAll()">✕ Reset</button>
+  </div>
+
+  <!-- ═══ OUTPUT ════════════════════════════════════════════════════════════ -->
+  <div class="output-area" id="outputArea" style="display:none">
+    <div class="output-head">
+      <div class="output-meta">
+        <div class="panel-title">◈ <span style="color:var(--accent)">Extracted Text</span></div>
+        <span class="meta-chip" id="chipConf"></span>
+        <span class="meta-chip" id="chipWords"></span>
+        <span class="meta-chip" id="chipTime"></span>
+      </div>
+      <div class="output-actions">
+        <button class="btn-sm copy" onclick="copyOutput()">⎘ Copy</button>
+        <button class="btn-sm" onclick="downloadTxt()">↓ TXT</button>
+        <button class="btn-sm" onclick="downloadJson()">↓ JSON</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('text', this)">Plain Text</div>
+      <div class="tab" onclick="switchTab('words', this)">Word Confidence</div>
+      <div class="tab" onclick="switchTab('hocr', this)">hOCR Data</div>
+    </div>
+
+    <div class="tab-content active" id="tabText">
+      <div id="outputText" contenteditable="true" spellcheck="false"></div>
+    </div>
+    <div class="tab-content" id="tabWords">
+      <div id="outputWords" style="padding:16px;font-family:var(--mono);font-size:12px;line-height:2;max-height:400px;overflow-y:auto"></div>
+    </div>
+    <div class="tab-content" id="tabHocr">
+      <pre id="outputHocr" style="padding:16px;font-family:var(--mono);font-size:11px;color:var(--text3);overflow:auto;max-height:400px;white-space:pre-wrap"></pre>
+    </div>
+
+    <div class="stats-bar" id="statsBar">
+      <div class="stat">Characters: <strong id="statChars">—</strong></div>
+      <div class="stat">Words: <strong id="statWords">—</strong></div>
+      <div class="stat">Lines: <strong id="statLines">—</strong></div>
+      <div class="stat">Avg Confidence: <strong id="statConf">—</strong></div>
+      <div class="stat">Engine: <strong>Tesseract.js WASM</strong></div>
+    </div>
+  </div>
+
+  <!-- ═══ LOG ═══════════════════════════════════════════════════════════════ -->
+  <div class="log-area" id="logArea"></div>
+
+  <!-- ═══ FOOTER ════════════════════════════════════════════════════════════ -->
+  <footer class="footer">
+    <div class="footer-left">
+      BlurOCR v1.0.0 · MIT License · Powered by OpenCV.js + Tesseract.js WASM
+    </div>
+    <div style="display:flex;gap:16px">
+      <a href="https://github.com/tesseract-ocr/tesseract" target="_blank">Tesseract</a>
+      <a href="https://opencv.org" target="_blank">OpenCV</a>
+      <a href="https://github.com/naptha/tesseract.js" target="_blank">Tesseract.js</a>
+    </div>
+  </footer>
+
+</div><!-- /.app -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     HIDDEN CANVASES (work buffers — not shown to user)
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<canvas id="cvWork" style="display:none"></canvas>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT — All logic below
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+const State = {
+  cvReady:    false,
+  tessReady:  false,
+  worker:     null,
+  image:      null,     // HTMLImageElement
+  blurScore:  0,
+  lastResult: null,
+  startTime:  0,
+};
+
+// Pipeline stage definitions
+const STAGES = [
+  { id: 'load',      label: 'Load' },
+  { id: 'scale',     label: 'Upscale' },
+  { id: 'gray',      label: 'Grayscale' },
+  { id: 'clahe',     label: 'CLAHE' },
+  { id: 'denoise',   label: 'Denoise' },
+  { id: 'sharpen',   label: 'Sharpen' },
+  { id: 'thresh',    label: 'Threshold' },
+  { id: 'morph',     label: 'Morph' },
+  { id: 'deskew',    label: 'Deskew' },
+  { id: 'pad',       label: 'Pad' },
+  { id: 'ocr',       label: 'OCR' },
+  { id: 'parse',     label: 'Parse' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGGING
+// ─────────────────────────────────────────────────────────────────────────────
+function log(msg, type = 'info') {
+  const area = document.getElementById('logArea');
+  const t = new Date().toLocaleTimeString('en', { hour12: false });
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.innerHTML = `<span class="log-time">${t}</span><span class="log-msg ${type}">${msg}</span>`;
+  area.appendChild(line);
+  area.scrollTop = area.scrollHeight;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPENCV INIT
+// ─────────────────────────────────────────────────────────────────────────────
+function onOpenCvReady() {
+  State.cvReady = true;
+  document.getElementById('cvDot').className   = 'status-dot ready';
+  document.getElementById('cvLabel').textContent = 'OpenCV Ready';
+  log('OpenCV.js WASM loaded ✓', 'ok');
+  checkBothReady();
+}
+
+function onOpenCvError() {
+  document.getElementById('cvDot').className   = 'status-dot error';
+  document.getElementById('cvLabel').textContent = 'OpenCV Failed';
+  log('OpenCV.js failed to load — check network', 'error');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TESSERACT INIT
+// ─────────────────────────────────────────────────────────────────────────────
+async function initTesseract() {
+  try {
+    log('Initialising Tesseract.js worker…', 'info');
+    State.worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          setStage('ocr', 'active');
+          setProgress(70 + m.progress * 25);
+        }
+      }
+    });
+    State.tessReady = true;
+    document.getElementById('tessDot').className   = 'status-dot ready';
+    document.getElementById('tessLabel').textContent = 'Tesseract Ready';
+    log('Tesseract.js WASM worker ready ✓', 'ok');
+    checkBothReady();
+  } catch (e) {
+    document.getElementById('tessDot').className   = 'status-dot error';
+    document.getElementById('tessLabel').textContent = 'Tesseract Failed';
+    log(`Tesseract init error: ${e.message}`, 'error');
+  }
+}
+
+function checkBothReady() {
+  if (State.cvReady && State.tessReady) {
+    log('All engines ready. Drop an image to begin.', 'ok');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FILE INPUT
+// ─────────────────────────────────────────────────────────────────────────────
+function setupDrop() {
+  const dz = document.getElementById('dropzone');
+  const fi = document.getElementById('fileInput');
+
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) loadFile(f);
+  });
+
+  fi.addEventListener('change', e => {
+    if (e.target.files[0]) loadFile(e.target.files[0]);
+  });
+}
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      State.image = img;
+      document.getElementById('imgOriginal').src = ev.target.result;
+      document.getElementById('dropzone').style.display    = 'none';
+      document.getElementById('settingsPanel').style.display = '';
+      document.getElementById('imageGrid').style.display   = 'grid';
+      document.getElementById('actionBar').style.display   = 'flex';
+      document.getElementById('pipelinePanel').style.display = '';
+      document.getElementById('outputArea').style.display  = 'none';
+
+      // Reset previews
+      document.getElementById('canvasProcessed').style.display = 'none';
+      document.getElementById('canvasFinal').style.display      = 'none';
+      document.getElementById('phProcessed').style.display      = '';
+      document.getElementById('phFinal').style.display           = '';
+
+      buildPipeline();
+      measureBlur();
+      autoPreset();
+      log(`Image loaded: ${img.width}×${img.height}px · ${(file.size/1024).toFixed(1)}KB · ${file.type}`, 'data');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLUR DETECTION (Laplacian variance)
+// ─────────────────────────────────────────────────────────────────────────────
+function measureBlur() {
+  if (!State.cvReady || !State.image) return;
+
+  const work = document.getElementById('cvWork');
+  work.width  = State.image.width;
+  work.height = State.image.height;
+  const ctx = work.getContext('2d');
+  ctx.drawImage(State.image, 0, 0);
+
+  let src = cv.imread(work);
+  let gray = new cv.Mat();
+  let lap  = new cv.Mat();
+  let mean = new cv.Mat();
+  let stddev = new cv.Mat();
+
+  try {
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.Laplacian(gray, lap, cv.CV_64F);
+    cv.meanStdDev(lap, mean, stddev);
+    const variance = stddev.doubleAt(0,0) ** 2;
+    State.blurScore = variance;
+
+    // Normalise to 0-100 (100 = sharp, 0 = very blurry)
+    const norm = Math.min(100, (variance / 1000) * 100);
+    const pct  = 100 - norm; // invert: high bar = blurry
+
+    const fill  = document.getElementById('blurFill');
+    const label = document.getElementById('blurLabel');
+    fill.style.width = pct + '%';
+
+    let blurLevel, color;
+    if (variance > 500)     { blurLevel = 'Sharp';        color = 'var(--accent)';  }
+    else if (variance > 100){ blurLevel = 'Mild blur';    color = 'var(--warn)';    }
+    else if (variance > 20) { blurLevel = 'Blurry';       color = 'var(--accent3)'; }
+    else                    { blurLevel = 'Very blurry';  color = 'var(--accent3)'; }
+
+    fill.style.background = color;
+    label.textContent  = `${blurLevel} (σ²=${variance.toFixed(1)})`;
+    label.style.color  = color;
+
+    document.getElementById('imgMeta').textContent =
+      `${State.image.width}×${State.image.height}px · blur σ²=${variance.toFixed(1)}`;
+
+    log(`Blur detection: σ²=${variance.toFixed(1)} → ${blurLevel}`, 'data');
+  } finally {
+    src.delete(); gray.delete(); lap.delete(); mean.delete(); stddev.delete();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTO PRESET — adjust sliders based on blur score
+// ─────────────────────────────────────────────────────────────────────────────
+function autoPreset() {
+  const v = State.blurScore;
+  let sharpen, denoise, clahe, scale, block, adaptive, morph, deskew;
+
+  if (v > 500) {
+    // Sharp — minimal processing
+    sharpen = 1; denoise = 5;  clahe = 2; scale = 1; block = 11;
+    adaptive = false; morph = false; deskew = true;
+    log('Auto preset: SHARP — light processing only', 'info');
+  } else if (v > 100) {
+    // Mild blur
+    sharpen = 2; denoise = 10; clahe = 3; scale = 2; block = 11;
+    adaptive = true; morph = false; deskew = true;
+    log('Auto preset: MILD BLUR — moderate processing', 'info');
+  } else if (v > 20) {
+    // Blurry
+    sharpen = 3.5; denoise = 18; clahe = 5; scale = 2; block = 15;
+    adaptive = true; morph = true; deskew = true;
+    log('Auto preset: BLURRY — aggressive processing', 'warn');
+  } else {
+    // Very blurry
+    sharpen = 5; denoise = 25; clahe = 8; scale = 3; block = 21;
+    adaptive = true; morph = true; deskew = true;
+    log('Auto preset: VERY BLURRY — maximum enhancement', 'warn');
+  }
+
+  setSlider('slSharpen', sharpen, 'valSharpen', '×');
+  setSlider('slDenoise',  denoise, 'valDenoise', '');
+  setSlider('slClahe',    clahe,   'valClahe',   '');
+  setSlider('slScale',    scale,   'valScale',   '×');
+  setSlider('slBlock',    block,   'valBlock',   '');
+  document.getElementById('togAdaptive').checked = adaptive;
+  document.getElementById('togMorph').checked    = morph;
+  document.getElementById('togDeskew').checked   = deskew;
+}
+
+function setSlider(id, val, valId, suffix) {
+  document.getElementById(id).value = val;
+  document.getElementById(valId).textContent = val + suffix;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE UI
+// ─────────────────────────────────────────────────────────────────────────────
+function buildPipeline() {
+  const container = document.getElementById('pipelineStages');
+  container.innerHTML = '';
+  STAGES.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'stage';
+    el.id = 'stage_' + s.id;
+    el.textContent = s.label;
+    container.appendChild(el);
+  });
+  setProgress(0);
+}
+
+function setStage(id, state) {
+  const el = document.getElementById('stage_' + id);
+  if (!el) return;
+  el.className = 'stage ' + state;
+}
+
+function setProgress(pct) {
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SLIDER LIVE UPDATES
+// ─────────────────────────────────────────────────────────────────────────────
+function bindSliders() {
+  const sliders = [
+    ['slSharpen', 'valSharpen', '×'],
+    ['slDenoise',  'valDenoise',  ''],
+    ['slClahe',    'valClahe',    ''],
+    ['slScale',    'valScale',    '×'],
+    ['slBlock',    'valBlock',    ''],
+  ];
+  sliders.forEach(([id, vid, suf]) => {
+    document.getElementById(id).addEventListener('input', e => {
+      document.getElementById(vid).textContent = e.target.value + suf;
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CORE: OpenCV Preprocessing Pipeline
+// Returns a canvas element with the final processed image
+// ─────────────────────────────────────────────────────────────────────────────
+async function preprocessImage(showIntermediate = false) {
+  if (!State.cvReady) throw new Error('OpenCV not ready');
+
+  const params = {
+    sharpen:  parseFloat(document.getElementById('slSharpen').value),
+    denoise:  parseInt(document.getElementById('slDenoise').value),
+    clahe:    parseFloat(document.getElementById('slClahe').value),
+    scale:    parseFloat(document.getElementById('slScale').value),
+    block:    parseInt(document.getElementById('slBlock').value),
+    adaptive: document.getElementById('togAdaptive').checked,
+    morph:    document.getElementById('togMorph').checked,
+    deskew:   document.getElementById('togDeskew').checked,
+  };
+
+  // Draw source to work canvas
+  const work = document.getElementById('cvWork');
+  work.width  = State.image.width;
+  work.height = State.image.height;
+  const ctx = work.getContext('2d');
+  ctx.drawImage(State.image, 0, 0);
+
+  let mat = cv.imread(work);
+  const toDelete = [mat];
+
+  try {
+    // ── Stage: UPSCALE ────────────────────────────────────────────────────
+    setStage('scale', 'active'); setProgress(5);
+    if (params.scale > 1) {
+      let scaled = new cv.Mat();
+      cv.resize(mat, scaled, new cv.Size(0,0), params.scale, params.scale, cv.INTER_CUBIC);
+      mat.delete(); mat = scaled; toDelete.push(mat);
+      log(`Upscaled ${params.scale}× → ${mat.cols}×${mat.rows}px`, 'data');
+    }
+    setStage('scale', 'done'); setProgress(10);
+
+    // ── Stage: GRAYSCALE ──────────────────────────────────────────────────
+    setStage('gray', 'active');
+    let gray = new cv.Mat();
+    cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+    toDelete.push(gray);
+    setStage('gray', 'done'); setProgress(18);
+
+    // Show intermediate after grayscale + scale
+    if (showIntermediate) {
+      displayOnCanvas('canvasProcessed', 'phProcessed', gray, true);
+    }
+
+    // ── Stage: CLAHE (Adaptive Histogram Equalisation) ────────────────────
+    setStage('clahe', 'active');
+    let claheOut = new cv.Mat();
+    const clahe = new cv.CLAHE(params.clahe, new cv.Size(8,8));
+    clahe.apply(gray, claheOut);
+    clahe.delete();
+    gray.delete();
+    gray = claheOut;
+    toDelete.push(gray);
+    setStage('clahe', 'done'); setProgress(26);
+
+    // ── Stage: DENOISE (fastNlMeansDenoising) ────────────────────────────
+    setStage('denoise', 'active');
+    if (params.denoise > 0) {
+      let denoised = new cv.Mat();
+      cv.fastNlMeansDenoising(gray, denoised, params.denoise, 7, 21);
+      gray.delete();
+      gray = denoised;
+      toDelete.push(gray);
+      log(`Denoised h=${params.denoise}`, 'info');
+    }
+    setStage('denoise', 'done'); setProgress(36);
+
+    // ── Stage: SHARPEN (Unsharp Mask via kernel) ──────────────────────────
+    setStage('sharpen', 'active');
+    if (params.sharpen > 0) {
+      // Build a sharpening kernel: identity + laplacian-weighted
+      // Kernel: [ 0, -s, 0 ]
+      //         [-s, 1+4s, -s]
+      //         [ 0, -s, 0 ]
+      const s = params.sharpen * 0.3;
+      const kData = [
+        0,  -s,  0,
+       -s, 1+4*s, -s,
+        0,  -s,  0
+      ];
+      const kernel = cv.matFromArray(3, 3, cv.CV_32F, kData);
+      let sharpened = new cv.Mat();
+      cv.filter2D(gray, sharpened, -1, kernel);
+      kernel.delete();
+      gray.delete();
+      gray = sharpened;
+      toDelete.push(gray);
+
+      // For strong blur, add a second pass with high-boost filter
+      if (params.sharpen >= 3) {
+        const s2 = (params.sharpen - 2) * 0.5;
+        const k2data = [
+          -s2, -s2, -s2,
+          -s2, 1+8*s2, -s2,
+          -s2, -s2, -s2
+        ];
+        const kernel2 = cv.matFromArray(3, 3, cv.CV_32F, k2data);
+        let sharp2 = new cv.Mat();
+        cv.filter2D(gray, sharp2, -1, kernel2);
+        kernel2.delete();
+        gray.delete();
+        gray = sharp2;
+        toDelete.push(gray);
+      }
+      log(`Sharpened ×${params.sharpen}`, 'info');
+    }
+    setStage('sharpen', 'done'); setProgress(48);
+
+    // ── Stage: THRESHOLD ──────────────────────────────────────────────────
+    setStage('thresh', 'active');
+    let binary = new cv.Mat();
+    if (params.adaptive) {
+      // Adaptive Gaussian threshold — handles uneven illumination
+      const blockSize = params.block % 2 === 0 ? params.block + 1 : params.block;
+      cv.adaptiveThreshold(
+        gray, binary, 255,
+        cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv.THRESH_BINARY,
+        blockSize, 4
+      );
+      log(`Adaptive threshold block=${blockSize}`, 'info');
+    } else {
+      // Otsu's automatic global threshold
+      cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+      log('Otsu global threshold', 'info');
+    }
+    gray.delete();
+    toDelete.push(binary);
+    setStage('thresh', 'done'); setProgress(58);
+
+    // ── Stage: MORPHOLOGICAL CLOSING ──────────────────────────────────────
+    setStage('morph', 'active');
+    if (params.morph) {
+      // Closing = dilate then erode → fills small gaps in character strokes
+      const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2,2));
+      let morphed = new cv.Mat();
+      cv.morphologyEx(binary, morphed, cv.MORPH_CLOSE, kernel);
+      kernel.delete();
+      binary.delete();
+      binary = morphed;
+      toDelete.push(binary);
+      log('Morphological closing applied', 'info');
+    }
+    setStage('morph', 'done'); setProgress(66);
+
+    // ── Stage: DESKEW ─────────────────────────────────────────────────────
+    setStage('deskew', 'active');
+    if (params.deskew) {
+      const angle = detectSkewAngle(binary);
+      if (Math.abs(angle) > 0.5 && Math.abs(angle) < 45) {
+        const center = new cv.Point(binary.cols / 2, binary.rows / 2);
+        const rotMat = cv.getRotationMatrix2D(center, angle, 1.0);
+        let deskewed = new cv.Mat();
+        cv.warpAffine(binary, deskewed, rotMat, new cv.Size(binary.cols, binary.rows),
+          cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(255,255,255,255));
+        rotMat.delete();
+        binary.delete();
+        binary = deskewed;
+        toDelete.push(binary);
+        log(`Deskewed ${angle.toFixed(2)}°`, 'data');
+      } else {
+        log(`Deskew: angle=${angle.toFixed(2)}° — no correction needed`, 'info');
+      }
+    }
+    setStage('deskew', 'done'); setProgress(76);
+
+    // ── Stage: BORDER PADDING ─────────────────────────────────────────────
+    setStage('pad', 'active');
+    const PAD = 20;
+    let padded = new cv.Mat();
+    cv.copyMakeBorder(binary, padded, PAD, PAD, PAD, PAD,
+      cv.BORDER_CONSTANT, new cv.Scalar(255,255,255,255));
+    binary.delete();
+    binary = padded;
+    toDelete.push(binary);
+    setStage('pad', 'done'); setProgress(82);
+
+    // Write final image to work canvas
+    cv.imshow(work, binary);
+
+    // Show final preview canvases
+    displayOnCanvas('canvasFinal', 'phFinal', binary, true);
+
+    return work; // caller reads this canvas
+
+  } finally {
+    // Cleanup — only delete mats that haven't been replaced
+    // (we track them with toDelete but they may have been deleted inline)
+    // Safe cleanup:
+    for (const m of toDelete) {
+      try { if (!m.isDeleted()) m.delete(); } catch(_) {}
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESKEW ANGLE DETECTION (Hough Lines)
+// ─────────────────────────────────────────────────────────────────────────────
+function detectSkewAngle(binaryMat) {
+  let edges = new cv.Mat();
+  let lines  = new cv.Mat();
+  try {
+    cv.Canny(binaryMat, edges, 50, 150);
+    cv.HoughLines(edges, lines, 1, Math.PI/180, Math.floor(binaryMat.cols * 0.4));
+    if (lines.rows === 0) return 0;
+
+    const angles = [];
+    const maxLines = Math.min(lines.rows, 20);
+    for (let i = 0; i < maxLines; i++) {
+      const theta = lines.data32F[i * 2 + 1];
+      let angle = (theta * 180 / Math.PI) - 90;
+      if (Math.abs(angle) > 45) angle = angle > 0 ? angle - 90 : angle + 90;
+      angles.push(angle);
+    }
+    // Median angle
+    angles.sort((a,b) => a-b);
+    return angles[Math.floor(angles.length / 2)];
+  } finally {
+    edges.delete();
+    lines.delete();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISPLAY MAT ON CANVAS
+// ─────────────────────────────────────────────────────────────────────────────
+function displayOnCanvas(canvasId, placeholderId, mat, grayscale = false) {
+  const canvas = document.getElementById(canvasId);
+  const ph     = document.getElementById(placeholderId);
+
+  // Scale to reasonable display size
+  const maxW = 400, maxH = 300;
+  let w = mat.cols, h = mat.rows;
+  if (w > maxW) { h = h * maxW / w; w = maxW; }
+  if (h > maxH) { w = w * maxH / h; h = maxH; }
+
+  canvas.width = w; canvas.height = h;
+
+  // imshow works on any size — we'll draw the mat then scale
+  const tmp = document.createElement('canvas');
+  tmp.width = mat.cols; tmp.height = mat.rows;
+  cv.imshow(tmp, mat);
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(tmp, 0, 0, w, h);
+
+  canvas.style.display = 'block';
+  ph.style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREVIEW ONLY (no OCR)
+// ─────────────────────────────────────────────────────────────────────────────
+async function previewProcessing() {
+  if (!State.image) return;
+  if (!State.cvReady) { log('OpenCV not ready yet', 'warn'); return; }
+  resetStages();
+  setStage('load', 'done');
+  try {
+    log('Running preprocessing preview…', 'info');
+    await preprocessImage(true);
+    log('Preview complete', 'ok');
+  } catch(e) {
+    log('Preview error: ' + e.message, 'error');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN EXTRACTION FLOW
+// ─────────────────────────────────────────────────────────────────────────────
+async function runExtraction() {
+  if (!State.image)     { log('No image loaded', 'error'); return; }
+  if (!State.cvReady)   { log('OpenCV not ready', 'warn'); return; }
+  if (!State.tessReady) { log('Tesseract not ready', 'warn'); return; }
+
+  const btn = document.getElementById('btnExtract');
+  btn.disabled = true;
+  State.startTime = Date.now();
+  resetStages();
+
+  try {
+    // ── Load ──────────────────────────────────────────────────────────────
+    setStage('load', 'active'); setProgress(2);
+    log('Starting extraction pipeline…', 'info');
+    await sleep(10); // yield to browser for UI update
+    setStage('load', 'done'); setProgress(5);
+
+    // ── Preprocess ────────────────────────────────────────────────────────
+    const processedCanvas = await preprocessImage(true);
+    setProgress(82);
+
+    // ── OCR ───────────────────────────────────────────────────────────────
+    setStage('ocr', 'active');
+    log('Sending to Tesseract WASM engine…', 'info');
+
+    const lang = document.getElementById('selLang').value;
+    const psm  = document.getElementById('selPsm').value;
+
+    // If language changed, reinit worker
+    await State.worker.setParameters({ tessedit_pageseg_mode: psm });
+
+    const result = await State.worker.recognize(processedCanvas);
+
+    setStage('ocr', 'done'); setProgress(96);
+
+    // ── Parse ─────────────────────────────────────────────────────────────
+    setStage('parse', 'active');
+    const data = result.data;
+    State.lastResult = data;
+
+    displayResults(data);
+
+    setStage('parse', 'done'); setProgress(100);
+
+    const elapsed = ((Date.now() - State.startTime) / 1000).toFixed(2);
+    document.getElementById('pipelineTime').textContent = `${elapsed}s`;
+    log(`Extraction complete in ${elapsed}s · confidence: ${data.confidence.toFixed(1)}%`, 'ok');
+
+  } catch(e) {
+    log('Extraction error: ' + e.message, 'error');
+    console.error(e);
+    STAGES.forEach(s => {
+      const el = document.getElementById('stage_' + s.id);
+      if (el && el.classList.contains('active')) setStage(s.id, 'error');
+    });
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISPLAY RESULTS
+// ─────────────────────────────────────────────────────────────────────────────
+function displayResults(data) {
+  document.getElementById('outputArea').style.display = '';
+
+  const text = data.text.trim();
+
+  // ── Plain text tab ──
+  document.getElementById('outputText').textContent = text;
+
+  // ── Confidence chip ──
+  const conf = data.confidence;
+  const chip = document.getElementById('chipConf');
+  chip.textContent = `${conf.toFixed(0)}% confidence`;
+  chip.className = 'meta-chip ' + (conf > 75 ? 'good' : conf > 45 ? 'mid' : 'bad');
+
+  // ── Stats ──
+  const words   = data.words || [];
+  const lines   = text.split('\n').filter(l => l.trim());
+  const chars   = text.replace(/\s/g,'').length;
+  const elapsed = ((Date.now() - State.startTime) / 1000).toFixed(2);
+
+  document.getElementById('chipWords').textContent = `${words.length} words`;
+  document.getElementById('chipTime').textContent  = `${elapsed}s`;
+  document.getElementById('statChars').textContent = chars;
+  document.getElementById('statWords').textContent = words.length;
+  document.getElementById('statLines').textContent = lines.length;
+  document.getElementById('statConf').textContent  = conf.toFixed(1) + '%';
+
+  // ── Word confidence tab ──
+  const wOut = document.getElementById('outputWords');
+  wOut.innerHTML = '';
+  words.forEach(w => {
+    const c = w.confidence;
+    const color = c > 80 ? 'var(--accent)' : c > 50 ? 'var(--warn)' : 'var(--accent3)';
+    const span = document.createElement('span');
+    span.style.cssText = `color:${color};margin-right:8px;cursor:default`;
+    span.title = `${c.toFixed(0)}% confidence`;
+    span.textContent = w.text + ' ';
+    wOut.appendChild(span);
+  });
+
+  // ── hOCR tab ──
+  document.getElementById('outputHocr').textContent = JSON.stringify({
+    confidence: data.confidence,
+    words: words.map(w => ({ text: w.text, confidence: w.confidence, bbox: w.bbox })),
+    lines: (data.lines || []).map(l => ({ text: l.text, confidence: l.confidence })),
+    blocks: (data.blocks || []).map(b => ({ text: b.text, confidence: b.confidence })),
+  }, null, 2);
+
+  switchTab('text', document.querySelector('.tab.active') || document.querySelectorAll('.tab')[0]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────────────────────────────────────
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const tc = document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1));
+  if (tc) tc.classList.add('active');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORT
+// ─────────────────────────────────────────────────────────────────────────────
+function copyOutput() {
+  const text = document.getElementById('outputText').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.btn-sm.copy');
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+function downloadTxt() {
+  const text = document.getElementById('outputText').textContent;
+  download('blurocr_output.txt', text, 'text/plain');
+}
+
+function downloadJson() {
+  if (!State.lastResult) return;
+  const payload = {
+    version: '1.0.0',
+    engine: 'Tesseract.js WASM',
+    timestamp: new Date().toISOString(),
+    confidence: State.lastResult.confidence,
+    text: State.lastResult.text.trim(),
+    words: (State.lastResult.words || []).map(w => ({
+      text: w.text,
+      confidence: w.confidence,
+      bbox: w.bbox
+    })),
+  };
+  download('blurocr_output.json', JSON.stringify(payload, null, 2), 'application/json');
+}
+
+function download(filename, content, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESET
+// ─────────────────────────────────────────────────────────────────────────────
+function resetAll() {
+  State.image = null;
+  State.lastResult = null;
+  document.getElementById('fileInput').value = '';
+  document.getElementById('dropzone').style.display       = '';
+  document.getElementById('settingsPanel').style.display  = 'none';
+  document.getElementById('imageGrid').style.display      = 'none';
+  document.getElementById('actionBar').style.display      = 'none';
+  document.getElementById('pipelinePanel').style.display  = 'none';
+  document.getElementById('outputArea').style.display     = 'none';
+  document.getElementById('blurFill').style.width         = '0%';
+  document.getElementById('blurLabel').textContent        = '—';
+  document.getElementById('imgMeta').textContent          = '';
+  log('Reset.', 'info');
+}
+
+function resetStages() {
+  STAGES.forEach(s => setStage(s.id, ''));
+  setProgress(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  setupDrop();
+  bindSliders();
+  initTesseract();
+  log('BlurOCR v1.0.0 initialising…', 'info');
+  log('Loading OpenCV.js WASM (~8MB, cached after first load)…', 'info');
+  log('Loading Tesseract.js WASM (~10MB, cached after first load)…', 'info');
+});
+</script>
+</body>
+</html>
