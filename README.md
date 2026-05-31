@@ -38,7 +38,7 @@ Download `BlurOCR.html` from the [Releases page](../../releases) and double-clic
 
 ### Option 2 — Clone and run
 ```bash
-git clone https://github.com/YOUR_USERNAME/blurocr
+git clone https://github.com/Alok583/blurocr
 cd blurocr
 
 # Open directly:
@@ -176,7 +176,7 @@ PRs are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ### Development
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/blurocr
+git clone https://github.com/Alok583/blurocr
 cd blurocr
 # No build step! Just edit BlurOCR.html and open in browser.
 python -m http.server 8080
