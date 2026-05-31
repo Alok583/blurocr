@@ -1,0 +1,30 @@
+# BlurOCR .gitignore
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+*.temp
+
+# Node (if anyone adds a build step in future)
+node_modules/
+dist/
+.env
+
+# Test images (keep repo lightweight)
+test-images/
+
+# Archives (release zips are attached to GitHub Releases, not committed)
+*.zip
