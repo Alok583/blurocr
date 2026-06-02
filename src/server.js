@@ -13,6 +13,7 @@
  */
 
 'use strict';
+require('dotenv').config();
 
 const express      = require('express');
 const fileUpload   = require('express-fileupload');
@@ -21,6 +22,8 @@ const morgan       = require('morgan');
 const path         = require('path');
 const fs           = require('fs');
 const blurocr      = require('./index');
+const { processImageFallback } = require('./ocr-fallback');
+const { saveToSheet } = require('./sheets');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -84,7 +87,12 @@ app.post('/extract', async (req, res) => {
   };
 
   try {
-    const result = await blurocr.extract(file.tempFilePath || file.data, opts);
+    // 3-Tier Fallback OCR
+    const imagePath = file.tempFilePath || file.data;
+    const result = await processImageFallback(imagePath, opts);
+
+    // Save to Google Sheets
+    await saveToSheet(file.name, result.text, result.provider, result.confidence);
 
     // Clean up temp file
     if (file.tempFilePath && fs.existsSync(file.tempFilePath)) {
@@ -95,10 +103,9 @@ app.post('/extract', async (req, res) => {
       filename:   file.name,
       text:       result.text,
       confidence: result.confidence,
-      blurLevel:  result.blurLevel,
-      words:      result.words,
-      lines:      result.lines,
-      meta:       result.meta,
+      provider:   result.provider,
+      blurLevel:  result.blurLevel || 'unknown',
+      logs:       result.logs,
     });
 
   } catch (err) {
@@ -121,16 +128,23 @@ app.post('/extract/batch', async (req, res) => {
 
   try {
     const inputs  = files.map(f => f.tempFilePath || f.data);
+    // Note: extractBatch is updated in index.js to use processImageFallback
     const results = await blurocr.extractBatch(inputs, opts);
 
     // Map filenames back
-    const mapped = results.map((r, i) => ({
-      filename:   files[i]?.name || `file_${i}`,
-      text:       r.text,
-      confidence: r.confidence,
-      blurLevel:  r.blurLevel,
-      error:      r.error || null,
-    }));
+    const mapped = results.map((r, i) => {
+      // Save to Google Sheets in background
+      saveToSheet(files[i]?.name || `file_${i}`, r.text, r.provider, r.confidence).catch(console.error);
+      
+      return {
+        filename:   files[i]?.name || `file_${i}`,
+        text:       r.text,
+        confidence: r.confidence,
+        provider:   r.provider,
+        blurLevel:  r.blurLevel,
+        error:      r.error || null,
+      };
+    });
 
     // Cleanup temp files
     files.forEach(f => {

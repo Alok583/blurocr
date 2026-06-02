@@ -25,11 +25,13 @@
  */
 
 'use strict';
+require('dotenv').config();
 
 const fs   = require('fs');
 const path = require('path');
 const { preprocessImage, savePreprocessed, detectBlurLevel } = require('./preprocessor');
 const { recognize, terminateAll }                             = require('./ocr');
+const { processImageFallback }                                = require('./ocr-fallback');
 
 /**
  * Extract text from a single image.
@@ -99,7 +101,7 @@ async function extractBatch(inputs, options = {}, concurrency = 2) {
 
   async function runJob(input) {
     try {
-      const result = await extract(input, options);
+      const result = await processImageFallback(input, options);
       return { input: typeof input === 'string' ? input : '[buffer]', ...result, error: null };
     } catch (err) {
       return { input: typeof input === 'string' ? input : '[buffer]', error: err.message };
@@ -142,6 +144,7 @@ process.on('SIGINT',  cleanup);
 module.exports = {
   extract,
   extractBatch,
+  processImageFallback,
   detectBlur,
   cleanup,
   version: require('../package.json').version,

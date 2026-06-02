@@ -1,373 +1,139 @@
-<div align="center">
+# BlurOCR: The Ultimate 3-Tier Fallback OCR Tool (Vision + OCR.space + Tesseract) 🚀
 
-# 🔬 BlurOCR
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D%2018-brightgreen.svg)](https://nodejs.org)
 
-### The open-source OCR that actually works on blurry, degraded, real-world images.
+BlurOCR is a powerful, open-source Optical Character Recognition (OCR) pipeline designed to extract text from images—even heavily blurry, distorted, or low-quality photos. It uses an innovative **4-tier fallback system** (including Vision LLMs) combined with seamless **Google Sheets integration** to ensure you never lose extracted data.
 
-**No API key. No cloud. No subscription. Runs everywhere.**
+Whether you're building a receipt scanner, digitizing old documents, or trying to read a blurry license plate, BlurOCR provides production-ready reliability.
 
-[![npm version](https://img.shields.io/npm/v/blurocr?color=00d4aa&style=flat-square)](https://www.npmjs.com/package/blurocr)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?style=flat-square&logo=node.js)](https://nodejs.org)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker)](Dockerfile)
-[![CI](https://github.com/Alok583/blurocr/actions/workflows/ci.yml/badge.svg)](https://github.com/Alok583/blurocr/actions)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
-[![OpenCV](https://img.shields.io/badge/OpenCV-4.8-5C3EE8?style=flat-square)](https://opencv.org)
-[![Tesseract](https://img.shields.io/badge/Tesseract.js-5.x-orange?style=flat-square)](https://github.com/naptha/tesseract.js)
+## ✨ Features
 
-</div>
-
----
-
-## Why BlurOCR?
-
-**Tesseract** is powerful — but it fails on real-world images. The moment your image is blurry, dark, tilted, or noisy, accuracy collapses.
-
-**BlurOCR** applies a **10-stage OpenCV preprocessing pipeline** to repair the image *before* Tesseract ever sees it.
-
-| | Tesseract (raw) | BlurOCR |
-|---|:---:|:---:|
-| Blurry phone photos | ❌ | ✅ |
-| Low contrast / faded documents | ❌ | ✅ |
-| Uneven lighting / glare | ❌ | ✅ |
-| Tilted / skewed text | ❌ | ✅ |
-| Very small text | ❌ | ✅ |
-| Noisy / grainy images | ❌ | ✅ |
-| REST API server | ❌ | ✅ |
-| Docker ready | ❌ | ✅ |
-| Batch processing | ❌ | ✅ |
-| Auto blur detection | ❌ | ✅ |
-| Zero cloud dependency | ✅ | ✅ |
-| Open source | ✅ | ✅ |
+- **🛡️ 4-Tier Fallback Architecture:**
+  - **Tier 1:** [Google Cloud Vision API](https://cloud.google.com/vision) (Best accuracy, generous free tier of 1,000 requests/month).
+  - **Tier 2:** [OCR.space API](https://ocr.space/) (Excellent fallback, Engine 2 handles special characters perfectly, 25k free requests/month).
+  - **Tier 3:** **Nemotron Vision LLM via OpenRouter** (Advanced AI context understanding, extracts perfectly structured JSON receipts).
+  - **Tier 4:** [Tesseract.js](https://github.com/naptha/tesseract.js) with Sharp (10-stage local blur recovery pipeline). If all APIs fail or you have no internet, local processing takes over!
+- **📊 Google Sheets Auto-Sync:** Extracted text is automatically logged to your Google Sheet with timestamps, confidence scores, and the OCR provider used.
+- **🔌 Open-Source & Deploy Anywhere:** Run it locally, on a VPS, inside Docker, or as a REST API.
+- **🚫 No Vendor Lock-in:** Use it 100% locally with Tesseract, or configure your own free API keys.
 
 ---
 
-## Install
+## 🛠️ Installation & Setup
+
+You can run BlurOCR anywhere Node.js is installed.
 
 ```bash
-npm install blurocr
+# 1. Clone the repository
+git clone https://github.com/Alok583/blurocr.git
+cd blurocr
+
+# 2. Install dependencies
+npm install
 ```
 
-Or globally for the CLI:
+### Configure API Keys (The Magic Sauce)
 
-```bash
-npm install -g blurocr
-```
+BlurOCR uses environment variables to securely store your API keys. 
+
+1. Copy the example configuration file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Open `.env` and fill in your credentials:
+   ```env
+   # Path to your Google Cloud Service Account JSON file (for Vision & Sheets)
+   GOOGLE_APPLICATION_CREDENTIALS=./google-credentials.json
+   
+   # OCR.space API Key (Get a free one at https://ocr.space/OCRAPI)
+   OCR_SPACE_API_KEY=your_ocr_space_key
+   
+   # Google Sheet ID (Found in the URL of your spreadsheet)
+   GOOGLE_SHEET_ID=your_sheet_id_here
+   
+   # OpenRouter API Key (For Nemotron Vision LLM Tier 3)
+   OPENROUTER_API_KEY=your_openrouter_api_key_here
+   ```
+
+*(Don't have these keys? No problem. If they are missing, BlurOCR gracefully falls back directly to the local Tesseract.js engine!)*
 
 ---
 
-## Quick Start
+## 🚀 Usage
 
-### Node.js Library
+### 1. Run the REST API Server
+
+```bash
+npm run start
+# Or for development: npm run dev
+```
+
+The server will start at `http://localhost:3000`.
+
+### 2. Extract Text via API
+
+You can upload an image using `curl` or Postman to test the 3-tier fallback pipeline.
+
+```bash
+curl -X POST http://localhost:3000/extract \
+  -F "image=@/path/to/your/blurry-receipt.jpg"
+```
+
+**Response Example:**
+```json
+{
+  "success": true,
+  "filename": "blurry-receipt.jpg",
+  "text": "Total: $42.50",
+  "confidence": 100,
+  "provider": "Google Vision API",
+  "blurLevel": "unknown"
+}
+```
+*Behind the scenes, this exact data is instantly appended as a new row in your configured Google Sheet!*
+
+---
+
+## 📖 Programmatic API (Use it in your own code)
+
+You can easily integrate BlurOCR into your existing Node.js applications.
 
 ```javascript
 const blurocr = require('blurocr');
 
-// Extract text from any image — blurry or not
-const result = await blurocr.extract('photo.jpg');
+async function run() {
+  // Uses the 4-tier fallback (Vision -> OCR.space -> Nemotron -> Tesseract)
+  const result = await blurocr.processImageFallback('./invoice.png');
+  
+  console.log(`Extracted text: ${result.text}`);
+  console.log(`Provider used: ${result.provider}`);
+}
 
-console.log(result.text);        // Extracted text
-console.log(result.confidence);  // 0–100 confidence score
-console.log(result.blurLevel);   // 'sharp' | 'mild' | 'blurry' | 'veryBlur'
-```
-
-### CLI
-
-```bash
-# Extract text from any image
-blurocr extract receipt.jpg
-
-# Save result to file
-blurocr extract receipt.jpg --output result.txt
-
-# JSON output with full metadata
-blurocr extract receipt.jpg --json
-
-# Batch processing
-blurocr batch *.jpg --output-dir ./results
-
-# Start REST API server
-blurocr serve --port 3000
-
-# Detect blur level only (no OCR)
-blurocr detect-blur photo.jpg
-```
-
-### REST API
-
-```bash
-# Start the server
-blurocr serve
-
-# Extract text via HTTP (works from any language)
-curl -F "image=@photo.jpg" http://localhost:3000/extract
-
-# With options
-curl -F "image=@photo.jpg" -F "lang=eng" -F "psm=6" http://localhost:3000/extract
-
-# Batch
-curl -F "images=@img1.jpg" -F "images=@img2.jpg" http://localhost:3000/extract/batch
-```
-
-### Docker
-
-```bash
-# Build and run
-docker-compose up
-
-# Or manually
-docker build -t blurocr .
-docker run -p 3000:3000 blurocr
-
-# API is now at http://localhost:3000
+run();
 ```
 
 ---
 
-## The 10-Stage Pipeline
+## 💡 Why this architecture? (SEO & Tech Details)
 
-```
-Input Image  →  Blur Detection (σ² variance)
-              →  Auto-upscale 1–4× (bicubic)
-              →  Grayscale
-              →  Adaptive Contrast Normalization (CLAHE-equivalent)
-              →  Gamma Correction (exposure recovery)
-              →  Unsharp Masking — 1 or 2 passes
-              →  Median Denoising (3×3 kernel)
-              →  Otsu Thresholding (binarization)
-              →  Border Padding (20px — prevents edge crop)
-              →  Tesseract WASM OCR
-              →  Structured Text Output + Confidence
-```
+When extracting text from a **blurry image**, single-engine OCR solutions often fail. By orchestrating multiple engines, BlurOCR maximizes extraction success rates:
 
-The pipeline automatically configures itself based on detected blur level — no manual tuning needed.
+1. **Google Vision OCR** is industry-leading for natural scenes and dense document text detection, easily cutting through noise and blur.
+2. **OCR.space** provides an incredible secondary free OCR API that excels at parsing structured receipts and special characters.
+3. **Nemotron Vision LLM (OpenRouter)** adds state-of-the-art multimodal AI understanding to extract structured JSON data when traditional OCR struggles.
+4. **Tesseract OCR (Local)** combined with our WebAssembly pipeline and Sharp preprocessing (unsharp masking, adaptive thresholding, morphological operations) ensures you always have a zero-cost local fallback for text extraction.
 
-| Detected Blur | Strategy |
-|---|---|
-| **Sharp** (σ² > 60 StdDev) | Light processing only |
-| **Mild** (σ² 35–60) | Moderate enhancement |
-| **Blurry** (σ² 15–35) | Aggressive processing |
-| **Very Blurry** (σ² < 15) | Maximum enhancement + 2× sharpen pass |
+### Keywords for Discoverability
+`OCR`, `Blurry Image OCR`, `Free OCR API`, `Google Vision Node.js`, `Tesseract.js`, `Image to Text`, `Google Sheets API`, `Open Source OCR`, `Receipt Scanner`, `Vision LLM`, `Nemotron`, `Structured JSON Extraction`, `AI OCR`.
 
 ---
 
-## API Reference
+## 🤝 Contributing
 
-### `blurocr.extract(input, options?)`
+Contributions are welcome! Please check out [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 
-```javascript
-const result = await blurocr.extract(input, {
-  lang:             'eng',         // Tesseract language code (default: 'eng')
-  psm:              '6',           // Page Segmentation Mode 1–13 (default: '6')
-  blurLevel:        'auto',        // 'auto'|'sharp'|'mild'|'blurry'|'veryBlur'
-  savePreprocessed: './debug.png', // Save enhanced image for debugging
-  onProgress:       (stage, msg) => console.log(stage, msg),
-});
+## 📄 License
 
-// Returns:
-result.text           // string — plain text output
-result.confidence     // number — 0–100 weighted confidence
-result.words          // Word[] — per-word confidence + bounding boxes
-result.lines          // string[] — text split by lines
-result.blocks         // object[] — block-level structure
-result.paragraphs     // object[] — paragraph structure
-result.hocr           // string — hOCR XML output
-result.blurLevel      // 'sharp'|'mild'|'blurry'|'veryBlur'
-result.meta           // object — timing + image size metadata
-result.logs           // LogEntry[] — processing log
-```
-
-### `blurocr.extractBatch(inputs, options?, concurrency?)`
-
-```javascript
-const results = await blurocr.extractBatch(
-  ['img1.jpg', 'img2.png', 'img3.jpg'],
-  { lang: 'eng' },
-  2  // max parallel jobs (default: 2)
-);
-```
-
-### `blurocr.detectBlur(input)`
-
-```javascript
-const level = await blurocr.detectBlur('photo.jpg');
-// Returns: 'sharp' | 'mild' | 'blurry' | 'veryBlur'
-```
-
-### REST API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/extract` | Extract text from uploaded image |
-| `POST` | `/extract/batch` | Batch extract from multiple images |
-| `POST` | `/detect-blur` | Detect blur level (no OCR) |
-| `GET` | `/health` | Health check |
-| `GET` | `/version` | Version info |
-| `GET` | `/browser/BlurOCR.html` | Browser-based OCR tool |
-
----
-
-## Supported Languages
-
-BlurOCR supports all 100+ Tesseract language packs. Common ones:
-
-`eng` English · `fra` French · `deu` German · `spa` Spanish · `por` Portuguese  
-`chi_sim` Chinese · `jpn` Japanese · `kor` Korean · `ara` Arabic · `hin` Hindi · `rus` Russian
-
-```bash
-blurocr extract document.jpg --lang fra
-blurocr extract form.jpg --lang eng+fra
-```
-
----
-
-## Accuracy vs Raw Tesseract
-
-| Image Type | Tesseract | BlurOCR | Gain |
-|---|:---:|:---:|:---:|
-| Clean document | ~97% | ~97% | Neutral |
-| Mild phone blur | ~70% | ~90% | **+20pp** |
-| Severe motion blur | ~25% | ~75% | **+50pp** |
-| Low contrast / faded | ~40% | ~82% | **+42pp** |
-| Uneven lighting | ~55% | ~88% | **+33pp** |
-| Tilted ±10° | ~65% | ~91% | **+26pp** |
-| Small text (upscaled) | ~30% | ~80% | **+50pp** |
-| Noisy / grainy | ~50% | ~85% | **+35pp** |
-
----
-
-## Real-World Use Cases
-
-- 📄 **Blurry receipts & invoices** — rushed phone photos, motion blur, small thermal fonts
-- 📜 **Old legal documents** — faded ink, aged paper, low contrast
-- 🚗 **Dashcam / road signs** — severe motion blur, wide-angle cameras
-- 📋 **Whiteboard photos** — glare, uneven fluorescent lighting
-- 💊 **Medical prescriptions** — fast handwriting, crumpled paper
-- 🪪 **ID cards / passports** — overexposed outdoor light, holographic overlays
-- 🖼 **Screenshots / memes** — text on complex photo backgrounds
-- 🏭 **Industrial labels** — laser-etched marks on reflective metal
-
----
-
-## VPS Deployment
-
-### Using PM2
-
-```bash
-npm install -g pm2
-pm2 start src/server.js --name blurocr
-pm2 save
-pm2 startup
-```
-
-### Using systemd
-
-```ini
-# /etc/systemd/system/blurocr.service
-[Unit]
-Description=BlurOCR REST API
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/blurocr
-ExecStart=/usr/bin/node src/server.js
-Restart=on-failure
-Environment=PORT=3000
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-systemctl enable blurocr
-systemctl start blurocr
-```
-
-### Using Docker on VPS
-
-```bash
-git clone https://github.com/Alok583/blurocr
-cd blurocr
-docker-compose up -d
-# API live at http://YOUR_VPS_IP:3000
-```
-
----
-
-## Browser Version
-
-A standalone browser-only version (no server needed) is also included:
-
-```bash
-# Serve locally
-python -m http.server 8080
-# Open http://localhost:8080/browser/BlurOCR.html
-```
-
-Or open `browser/BlurOCR.html` directly — it loads OpenCV.js + Tesseract.js WASM from CDN on first use, then runs 100% offline forever.
-
----
-
-## Contributing
-
-PRs are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**High-value contribution areas:**
-- 🧠 **ESRGAN super-resolution** (ONNX) — AI upscaling vs bicubic
-- ✍️ **TrOCR handwriting backend** — Microsoft Transformers.js integration
-- 📑 **PDF support** — scanned PDFs via pdf.js
-- 🔢 **Table extraction** — structured output for forms
-- 🌐 **Web UI** — modern React/Next.js frontend for the API
-- 📊 **Benchmark suite** — standardized accuracy tests vs Tesseract
-
-### Development
-
-```bash
-git clone https://github.com/Alok583/blurocr
-cd blurocr
-npm install
-npm test
-
-# Start dev server with hot reload
-npm run dev
-```
-
----
-
-## Tech Stack
-
-| Library | Version | License | Role |
-|---|---|---|---|
-| [Tesseract.js](https://github.com/naptha/tesseract.js) | 5.x | Apache 2.0 | OCR engine (WASM) |
-| [Sharp](https://sharp.pixelplumbing.com/) | 0.33 | Apache 2.0 | Image preprocessing |
-| [Express](https://expressjs.com/) | 4.x | MIT | REST API server |
-| [Commander.js](https://github.com/tj/commander.js) | 12.x | MIT | CLI framework |
-| [OpenCV.js](https://opencv.org/) | 4.8.0 | Apache 2.0 | Browser preprocessing |
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE)
-
----
-
-## Credits
-
-Built on the shoulders of giants:
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) — the original open-source OCR engine by Google
-- [Tesseract.js](https://github.com/naptha/tesseract.js) — Tesseract compiled to WebAssembly
-- [Sharp](https://sharp.pixelplumbing.com/) — High-performance Node.js image processing
-- [OpenCV](https://opencv.org) — the world's most used computer vision library
-
----
-
-<div align="center">
-  <strong>BlurOCR</strong> · MIT License · Made with ❤️ for the open-source community
-  <br>
-  <a href="https://github.com/Alok583/blurocr/issues">Report Bug</a> · 
-  <a href="https://github.com/Alok583/blurocr/discussions">Discussions</a> · 
-  <a href="CONTRIBUTING.md">Contribute</a>
-</div>
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.

@@ -1,7 +1,7 @@
 {
   "name": "blurocr",
   "version": "2.0.0",
-  "description": "Advanced open-source OCR with 10-stage blur recovery pipeline. Runs on Node.js, VPS, Docker, REST API, CLI and browser. No API key. No cloud. Built on Tesseract.js + Sharp.",
+  "description": "Advanced open-source OCR with 4-tier fallback (Vision LLMs, OCR.space, Tesseract) and 10-stage blur recovery. Extracts perfect JSON receipts. Runs on Node.js, VPS, Docker, REST API.",
   "main": "src/index.js",
   "bin": {
     "blurocr": "bin/blurocr.js"
@@ -34,7 +34,11 @@
     "computer-vision",
     "receipt-ocr",
     "document-ocr",
-    "blurry-image"
+    "blurry-image",
+    "vision-llm",
+    "nemotron",
+    "structured-json-extraction",
+    "ai-ocr"
   ],
   "author": "BlurOCR Contributors",
   "license": "MIT",
@@ -47,16 +51,21 @@
     "url": "https://github.com/Alok583/blurocr/issues"
   },
   "dependencies": {
+    "@google-cloud/vision": "^5.3.6",
+    "axios": "^1.16.1",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
     "commander": "^12.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "express-fileupload": "^1.5.0",
+    "form-data": "^4.0.5",
+    "google-spreadsheet": "^5.2.0",
     "morgan": "^1.10.0",
-    "sharp": "^0.33.4",
-    "tesseract.js": "^5.1.0",
-    "cors": "^2.8.5",
-    "chalk": "^4.1.2",
     "ora": "^5.4.1",
-    "cli-table3": "^0.6.5"
+    "sharp": "^0.33.4",
+    "tesseract.js": "^5.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
